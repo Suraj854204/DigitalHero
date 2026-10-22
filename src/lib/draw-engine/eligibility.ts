@@ -1,14 +1,15 @@
+
 /**
  * Eligibility and snapshot building.
  *
- * A user is eligible for a draw iff, AT THE ELIGIBILITY CUTOFF:
- *   1. their paid access was active (see `isSubscriptionActiveAt`), and
- *   2. they have exactly five valid scores whose play date is on/before the
- *      cutoff date (the five most recent such scores are used).
+ * A user is eligible for a draw iff, at the eligibility cutoff:
+ * 1. Their paid subscription is active.
+ * 2. They have five valid scores dated on or before the cutoff date.
  *
- * Ineligible users are returned with a machine-readable reason so the admin UI
- * and the subscriber's "why am I not eligible" view share one source of truth.
+ * Subscription access uses the interval [activeFrom, activeUntil).
+ * A canceling subscription remains active until its paid period ends.
  */
+
 import {
   NUMBER_MAX,
   NUMBER_MIN,
@@ -20,6 +21,8 @@ import {
 } from "./types.ts";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+const ACTIVE_STATUSES = new Set(["active", "canceling"]);
 
 export type IneligibleReason =
   | "no_subscription"
@@ -34,84 +37,234 @@ export interface EligibilityResult {
   snapshot?: FrozenParticipant;
 }
 
-const ACTIVE_STATUSES = new Set(["active", "canceling"]);
-
-/**
- * Paid access is active at `cutoff` when the status grants access and the
- * cutoff falls inside [activeFrom, activeUntil). A "canceling" subscription
- * keeps access until the end of the paid period.
- */
-export function isSubscriptionActiveAt(sub: SubscriptionPeriod | null, cutoff: Date): boolean {
-  if (!sub || !ACTIVE_STATUSES.has(sub.status)) return false;
-  const from = Date.parse(sub.activeFrom);
-  if (Number.isNaN(from) || from > cutoff.getTime()) return false;
-  if (sub.activeUntil === null) return true;
-  const until = Date.parse(sub.activeUntil);
-  return !Number.isNaN(until) && until > cutoff.getTime();
-}
-
-export function isValidScore(s: ScoreRecord): boolean {
-  return (
-    Number.isInteger(s.value) &&
-    s.value >= NUMBER_MIN &&
-    s.value <= NUMBER_MAX &&
-    ISO_DATE.test(s.scoreDate) &&
-    !Number.isNaN(Date.parse(`${s.scoreDate}T00:00:00Z`))
-  );
-}
-
-/** Newest first by play date; ties are impossible per user (unique date) but id breaks them deterministically. */
-export function sortScoresNewestFirst(scores: readonly ScoreRecord[]): ScoreRecord[] {
-  return [...scores].sort((a, b) =>
-    a.scoreDate === b.scoreDate ? (a.id < b.id ? -1 : 1) : a.scoreDate < b.scoreDate ? 1 : -1,
-  );
-}
-
-export function evaluateEligibility(user: CandidateUser, cutoff: Date): EligibilityResult {
-  if (!user.subscription) return { userId: user.userId, eligible: false, reason: "no_subscription" };
-  if (!isSubscriptionActiveAt(user.subscription, cutoff)) {
-    return { userId: user.userId, eligible: false, reason: "subscription_inactive" };
-  }
-  const cutoffDate = cutoff.toISOString().slice(0, 10);
-  const inScope = user.scores.filter((s) => ISO_DATE.test(s.scoreDate) && s.scoreDate <= cutoffDate);
-  const latest = sortScoresNewestFirst(inScope).slice(0, SCORES_REQUIRED);
-  if (latest.length < SCORES_REQUIRED) {
-    return { userId: user.userId, eligible: false, reason: "too_few_scores" };
-  }
-  if (!latest.every(isValidScore) || new Set(latest.map((s) => s.scoreDate)).size !== latest.length) {
-    return { userId: user.userId, eligible: false, reason: "invalid_scores" };
-  }
-  return { userId: user.userId, eligible: true, snapshot: { userId: user.userId, scores: latest } };
-}
-
 export interface EligibilitySummary {
   participants: FrozenParticipant[];
-  ineligible: { userId: string; reason: IneligibleReason }[];
-}
-
-export function buildParticipants(users: readonly CandidateUser[], cutoff: Date): EligibilitySummary {
-  const participants: FrozenParticipant[] = [];
-  const ineligible: EligibilitySummary["ineligible"] = [];
-  const seen = new Set<string>();
-  for (const u of users) {
-    if (seen.has(u.userId)) continue; // a user can never be counted twice
-    seen.add(u.userId);
-    const r = evaluateEligibility(u, cutoff);
-    if (r.eligible && r.snapshot) participants.push(r.snapshot);
-    else ineligible.push({ userId: u.userId, reason: r.reason! });
-  }
-  participants.sort((a, b) => (a.userId < b.userId ? -1 : 1));
-  return { participants, ineligible };
+  ineligible: {
+    userId: string;
+    reason: IneligibleReason;
+  }[];
 }
 
 /**
- * Deep-freeze participants so engine code (and tests) cannot mutate a snapshot
- * after it has been captured. The database enforces the same rule with triggers.
+ * Returns true when paid subscription access is valid at the cutoff.
+ *
+ * activeFrom is inclusive.
+ * activeUntil is exclusive.
  */
-export function freezeSnapshot(participants: readonly FrozenParticipant[]): readonly FrozenParticipant[] {
+export function isSubscriptionActiveAt(
+  sub: SubscriptionPeriod | null,
+  cutoff: Date,
+): boolean {
+  if (!sub || !ACTIVE_STATUSES.has(sub.status)) {
+    return false;
+  }
+
+  const cutoffTime = cutoff.getTime();
+
+  if (!Number.isFinite(cutoffTime)) {
+    return false;
+  }
+
+  const activeFrom = Date.parse(sub.activeFrom);
+
+  if (!Number.isFinite(activeFrom) || activeFrom > cutoffTime) {
+    return false;
+  }
+
+  // A null end date means no recorded end date.
+  if (sub.activeUntil === null) {
+    return true;
+  }
+
+  const activeUntil = Date.parse(sub.activeUntil);
+
+  if (!Number.isFinite(activeUntil)) {
+    return false;
+  }
+
+  return cutoffTime < activeUntil;
+}
+
+/**
+ * Validates a golf score and its ISO calendar date.
+ */
+export function isValidScore(s: ScoreRecord): boolean {
+  if (
+    !Number.isInteger(s.value) ||
+    s.value < NUMBER_MIN ||
+    s.value > NUMBER_MAX ||
+    !ISO_DATE.test(s.scoreDate)
+  ) {
+    return false;
+  }
+
+  const parsedDate = new Date(`${s.scoreDate}T00:00:00.000Z`);
+
+  // Reject impossible dates such as 2026-02-30.
+  return (
+    Number.isFinite(parsedDate.getTime()) &&
+    parsedDate.toISOString().slice(0, 10) === s.scoreDate
+  );
+}
+
+/**
+ * Sort scores newest first.
+ * Score dates should be unique per user.
+ */
+export function sortScoresNewestFirst(
+  scores: readonly ScoreRecord[],
+): ScoreRecord[] {
+  return [...scores].sort((a, b) => {
+    if (a.scoreDate !== b.scoreDate) {
+      return a.scoreDate < b.scoreDate ? 1 : -1;
+    }
+
+    if (a.id === b.id) {
+      return 0;
+    }
+
+    return a.id < b.id ? -1 : 1;
+  });
+}
+
+/**
+ * Evaluates one candidate against the draw cutoff.
+ */
+export function evaluateEligibility(
+  user: CandidateUser,
+  cutoff: Date,
+): EligibilityResult {
+  if (!user.subscription) {
+    return {
+      userId: user.userId,
+      eligible: false,
+      reason: "no_subscription",
+    };
+  }
+
+  if (!isSubscriptionActiveAt(user.subscription, cutoff)) {
+    return {
+      userId: user.userId,
+      eligible: false,
+      reason: "subscription_inactive",
+    };
+  }
+
+  const cutoffTime = cutoff.getTime();
+
+  if (!Number.isFinite(cutoffTime)) {
+    return {
+      userId: user.userId,
+      eligible: false,
+      reason: "invalid_scores",
+    };
+  }
+
+  const cutoffDate = cutoff.toISOString().slice(0, 10);
+
+  // Consider only scores recorded on or before the cutoff date.
+  const inScope = user.scores.filter(
+    (score) =>
+      ISO_DATE.test(score.scoreDate) &&
+      score.scoreDate <= cutoffDate,
+  );
+
+  const latest = sortScoresNewestFirst(inScope).slice(
+    0,
+    SCORES_REQUIRED,
+  );
+
+  if (latest.length < SCORES_REQUIRED) {
+    return {
+      userId: user.userId,
+      eligible: false,
+      reason: "too_few_scores",
+    };
+  }
+
+  const allValid = latest.every(isValidScore);
+
+  const uniqueDates =
+    new Set(latest.map((score) => score.scoreDate)).size ===
+    latest.length;
+
+  if (!allValid || !uniqueDates) {
+    return {
+      userId: user.userId,
+      eligible: false,
+      reason: "invalid_scores",
+    };
+  }
+
+  return {
+    userId: user.userId,
+    eligible: true,
+    snapshot: {
+      userId: user.userId,
+      scores: latest,
+    },
+  };
+}
+
+/**
+ * Builds a unique, deterministic list of eligible participants.
+ */
+export function buildParticipants(
+  users: readonly CandidateUser[],
+  cutoff: Date,
+): EligibilitySummary {
+  const participants: FrozenParticipant[] = [];
+
+  const ineligible: EligibilitySummary["ineligible"] = [];
+
+  const seen = new Set<string>();
+
+  for (const user of users) {
+    if (seen.has(user.userId)) {
+      continue;
+    }
+
+    seen.add(user.userId);
+
+    const result = evaluateEligibility(user, cutoff);
+
+    if (result.eligible && result.snapshot) {
+      participants.push(result.snapshot);
+    } else {
+      ineligible.push({
+        userId: user.userId,
+        reason: result.reason!,
+      });
+    }
+  }
+
+  participants.sort((a, b) =>
+    a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0,
+  );
+
+  return {
+    participants,
+    ineligible,
+  };
+}
+
+/**
+ * Deep-freezes participant snapshots so they cannot be modified
+ * after the draw snapshot has been captured.
+ */
+export function freezeSnapshot(
+  participants: readonly FrozenParticipant[],
+): readonly FrozenParticipant[] {
   return Object.freeze(
-    participants.map((p) =>
-      Object.freeze({ userId: p.userId, scores: Object.freeze(p.scores.map((s) => Object.freeze({ ...s }))) }),
+    participants.map((participant) =>
+      Object.freeze({
+        userId: participant.userId,
+        scores: Object.freeze(
+          participant.scores.map((score) =>
+            Object.freeze({ ...score }),
+          ),
+        ),
+      }),
     ),
   );
 }
