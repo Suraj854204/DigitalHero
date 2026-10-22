@@ -1,0 +1,10 @@
+export const FAQ: { q: string; a: string }[] = [
+  { q: "What exactly am I paying for?", a: "A monthly or yearly subscription. Part of every payment goes to the charity you choose (never less than 10%), part funds the monthly prize pool, and the remainder runs the platform. You can see the exact split for your own payments in your dashboard." },
+  { q: "How do scores and the draw connect?", a: "You record your latest Stableford scores (1 to 45). We keep your five most recent. Each month, five numbers between 1 and 45 are drawn. If three, four or five of the numbers match values in your frozen five scores, you win a share of that tier's prize." },
+  { q: "Who is eligible for a draw?", a: "Members with an active subscription and five valid scores at the draw's eligibility cutoff. Your five scores at that moment are frozen into a snapshot, so later edits can't change a result that has already been decided." },
+  { q: "Are prizes guaranteed?", a: "No. Prizes depend on the month's pool and on how many members match. If nobody matches five numbers, the five-match share rolls over into the next month's jackpot." },
+  { q: "How do I claim a prize?", a: "Upload a screenshot of your scores as proof. An administrator reviews it, and once approved your payout is queued and then marked paid with a transfer reference. Every step is visible on your winnings page." },
+  { q: "Can I change my charity?", a: "Yes, any time. A change applies to payments recognised after you make it. Contributions already recorded keep the charity they were booked against." },
+  { q: "How do yearly plans handle charity money?", a: "A yearly payment is held as deferred revenue and recognised in twelve monthly instalments. Each instalment is then split between charity, prize pool and platform, so the same money is never counted twice." },
+  { q: "What happens if I cancel or a payment fails?", a: "Cancelling keeps access until the end of the paid period. A failed payment marks your subscription past due, and if it can't be recovered it lapses and you leave the draw until you resubscribe." },
+];

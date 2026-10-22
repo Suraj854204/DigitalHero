@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. One system for public, subscriber and admin surfaces.
+ * Palette: warm paper, deep ink, a single forest green for trust, and a warm coral reserved for
+ * charity/impact moments so that "giving" is the only thing that ever glows warm.
+ */
+@theme {
+  --color-paper: #f6f1e9;
+  --color-paper-2: #efe8dc;
+  --color-card: #fffdf9;
+  --color-ink: #14201b;
+  --color-ink-2: #3d4a44;
+  --color-muted: #6a766f;
+  --color-line: #ddd5c6;
+  --color-forest: #1f5a46;
+  --color-forest-2: #17463a;
+  --color-mint: #cfe3d6;
+  --color-coral: #d9603b;
+  --color-coral-soft: #f8dccf;
+  --color-gold: #b9892b;
+  --color-danger: #b3361f;
+  --color-ok: #1f7a4d;
+
+  --font-sans: ui-sans-serif, "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --shadow-soft: 0 1px 2px rgb(20 32 27 / 0.05), 0 8px 24px rgb(20 32 27 / 0.06);
+  --shadow-lift: 0 2px 4px rgb(20 32 27 / 0.06), 0 18px 40px rgb(20 32 27 / 0.12);
+  --spacing-gutter: 1.25rem;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Visible, high-contrast keyboard focus everywhere. */
+:focus-visible {
+  outline: 3px solid var(--color-forest);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: var(--color-mint);
+}
+
+.serif-accent {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--color-forest);
+}
+
+/* Subtle, purposeful motion. Disabled for people who ask for less. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(2deg);
+  }
+}
+
+.rise-in {
+  animation: rise-in 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rise-in-2 {
+  animation: rise-in 0.7s 0.12s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rise-in-3 {
+  animation: rise-in 0.7s 0.24s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.float-slow {
+  animation: float-slow 9s ease-in-out infinite;
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--color-paper-2) 25%, #f7f2e9 37%, var(--color-paper-2) 63%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: var(--radius-sm);
+}
+
+.card-lift {
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.card-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lift);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
